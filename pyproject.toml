@@ -23,6 +23,18 @@ dependencies = [
 dev = [
     "pytest",
     "ruff",
+    "pyinstaller>=6.10",
+]
+
+[tool.uv]
+# rapidocr-onnxruntime transitively depends on opencv-python (GUI build), which
+# bundles ~90 codec/GUI dylibs (SDL2, ffmpeg, X11, ...) we never use. The GUI
+# and headless wheels share the same `cv2` module, so pinning opencv-python to
+# an unsatisfiable marker leaves only opencv-python-headless installed. This
+# shrinks the PyInstaller bundle dramatically and avoids install_name_tool
+# failures on the unused GUI dylibs.
+override-dependencies = [
+    "opencv-python ; sys_platform == 'never'",
 ]
 
 [build-system]

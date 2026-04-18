@@ -1,0 +1,130 @@
+name: Release Binaries
+
+# Build multi-platform binaries only when a version tag is pushed.
+# To cut a release:
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# The workflow creates (or updates) a GitHub Release for that tag and
+# attaches one compressed binary archive per platform. Regular commits
+# never trigger a build — keeping Release artifacts uncluttered.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0). Required for manual runs."
+        required: true
+        type: string
+
+permissions:
+  contents: write  # required to upload release assets
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon runner
+            target: macos-arm64
+            archive_ext: tar.gz
+          - os: macos-13        # Intel runner
+            target: macos-x86_64
+            archive_ext: tar.gz
+          - os: ubuntu-22.04
+            target: linux-x86_64
+            archive_ext: tar.gz
+          - os: ubuntu-22.04-arm
+            target: linux-arm64
+            archive_ext: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python + dependencies
+        run: |
+          uv python install 3.12
+          uv sync --group dev
+
+      - name: Build binary
+        run: uv run pyinstaller pdf_translator_mcp.spec --clean --noconfirm
+
+      - name: Smoke-test binary
+        shell: bash
+        run: |
+          set -e
+          BIN=dist/pdf-translator-mcp
+          test -x "$BIN"
+          # Server reads JSON-RPC on stdin; 3s idle + SIGTERM = healthy startup.
+          ( "$BIN" </dev/null >/dev/null 2>&1 & PID=$!
+            sleep 3
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true ) || true
+          ls -lh "$BIN"
+
+      - name: Package archive
+        id: pkg
+        shell: bash
+        run: |
+          set -e
+          TARGET="${{ matrix.target }}"
+          ARCHIVE="pdf-translator-mcp-${TARGET}.tar.gz"
+          # -C dist so the archive contains just the binary at the root.
+          tar -czf "$ARCHIVE" -C dist pdf-translator-mcp
+          shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "checksum=${ARCHIVE}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact (for release job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ steps.pkg.outputs.archive }}
+            ${{ steps.pkg.outputs.checksum }}
+          retention-days: 7
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact layout
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.sha256' \) -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: release/*
