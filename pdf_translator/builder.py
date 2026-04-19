@@ -38,6 +38,19 @@ def build_translated_pdf(
     # Restore PyMuPDF document
     doc_zh = Document(stream=doc_zh_bytes)
 
+    # Remap page_xref from extract-time numbering to the post-save numbering.
+    # garbage collection during extract renumbers xrefs, so the page_xref we
+    # recorded no longer points at our placeholder stream. Look up each page's
+    # current single /Contents xref and use that instead.
+    pageno_to_current_xref: dict[int, int] = {}
+    for pageno in range(doc_zh.page_count):
+        contents = doc_zh[pageno].get_contents()
+        if len(contents) == 1:
+            pageno_to_current_xref[pageno] = contents[0]
+    for ps in pages:
+        if ps.pageno in pageno_to_current_xref:
+            ps.page_xref = pageno_to_current_xref[ps.pageno]
+
     # Restore font
     noto = Font(meta.noto_name, meta.font_path)
 

@@ -119,6 +119,8 @@ def extract_pdf(
     parser = PDFParser(fp)
     doc = PDFDocument(parser)
 
+    page_xref_map: dict[int, int] = {}
+
     for pageno, page in enumerate(PDFPage.create_pages(doc)):
         if target_pages and pageno not in target_pages:
             continue
@@ -160,30 +162,31 @@ def extract_pdf(
                 box[y0:y1, x0:x1] = 0
         layout[page.pageno] = box
 
-        # Create new xref for translated page content
+        # Create a fresh xref for the translated page content and make it the
+        # sole entry in the page's /Contents.
+        #
+        # NOTE on empty vs. placeholder streams: set_contents() only reliably
+        # persists through the save/reload cycle when the write() call uses
+        # garbage>=2. But garbage collection also prunes xrefs whose streams are
+        # empty. So we seed the new stream with a minimal valid PDF operation
+        # ("BT ET") — this is a no-op text block that keeps the xref alive
+        # through garbage collection until the build phase overwrites it with
+        # the real translated content.
         page.page_xref = doc_zh.get_new_xref()
         doc_zh.update_object(page.page_xref, "<<>>")
-        doc_zh.update_stream(page.page_xref, b"")
+        doc_zh.update_stream(page.page_xref, b"BT ET")
         doc_zh[page.pageno].set_contents(page.page_xref)
+        page_xref_map[page.pageno] = page.page_xref
 
         interpreter.process_page(page)
 
     device.close()
 
-    # Set page_xref on extracted states
+    # Propagate page_xref into each PageState so the build phase can write
+    # rendered ops back into the doc_zh stream.
     for ps in device.page_states:
-        # Find the xref from obj_patch
-        for xref, ops in obj_patch.items():
-            if isinstance(xref, int) and ops:
-                pass  # We'll track them via the page_states ordering
-
-    # Assign page_xrefs from doc_zh pages
-    page_xref_map = {}
-    parser2 = PDFParser(io.BytesIO(fp.getvalue()))
-    doc2 = PDFDocument(parser2)
-    for pageno, page in enumerate(PDFPage.create_pages(doc2)):
-        if hasattr(page, 'page_xref'):
-            page_xref_map[pageno] = page.page_xref
+        if ps.page_xref == 0 and ps.pageno in page_xref_map:
+            ps.page_xref = page_xref_map[ps.pageno]
 
     # Build chunks from extracted states
     chunks = []
@@ -217,7 +220,11 @@ def extract_pdf(
         font_path=font_path,
     )
 
-    # Save session
+    # Save session. garbage=3 is required for set_contents() to actually persist
+    # a single-xref /Contents on pages whose original /Contents is an array
+    # (title pages with watermark/header streams). The "BT ET" placeholder
+    # seeded above keeps the new xref alive through garbage collection so that
+    # the build phase can still find it and write the real translated ops.
     doc_zh_bytes = doc_zh.write(deflate=True, garbage=3, use_objstms=1)
     save_session(
         session_id=session_id,
