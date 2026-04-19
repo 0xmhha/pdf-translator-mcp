@@ -32,15 +32,15 @@ jobs:
           - os: macos-14        # Apple Silicon runner
             target: macos-arm64
             archive_ext: tar.gz
-          - os: macos-13        # Intel runner
-            target: macos-x86_64
-            archive_ext: tar.gz
           - os: ubuntu-22.04
             target: linux-x86_64
             archive_ext: tar.gz
           - os: ubuntu-22.04-arm
             target: linux-arm64
             archive_ext: tar.gz
+          # Intel macOS (macos-13) was dropped because hosted-runner queue
+          # times reached 9+ hours, blocking releases. Intel Mac users can
+          # install from source (see README "Option 2").
 
     steps:
       - name: Checkout

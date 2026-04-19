@@ -41,9 +41,10 @@ No Python, no `uv`, no build step. Each GitHub Release ships a single executable
    | Platform        | Asset                                          |
    |-----------------|------------------------------------------------|
    | macOS (Apple)   | `pdf-translator-mcp-macos-arm64.tar.gz`        |
-   | macOS (Intel)   | `pdf-translator-mcp-macos-x86_64.tar.gz`       |
    | Linux (x86_64)  | `pdf-translator-mcp-linux-x86_64.tar.gz`       |
    | Linux (arm64)   | `pdf-translator-mcp-linux-arm64.tar.gz`        |
+
+   > **macOS Intel (x86_64)** is not distributed as a prebuilt binary because GitHub's hosted `macos-13` runners have multi-hour queue times that block releases. Intel Mac users should install via [Option 2](#option-2--run-from-source-with-uv) or [Option 3](#option-3--build-your-own-binary).
 
 2. Extract and place on your `PATH`:
 
@@ -177,7 +178,7 @@ Formula segments in chunks appear as placeholders like `{v0}`, `{v1}`. These **m
 
 ## Requirements
 
-- **End users (prebuilt binary)**: macOS 12+ (arm64 or x86_64) or Linux (glibc 2.31+, x86_64 or arm64).
+- **End users (prebuilt binary)**: macOS 12+ (arm64 / Apple Silicon) or Linux (glibc 2.31+, x86_64 or arm64). Intel Macs build from source.
 - **From source**: Python ≥ 3.10 and [`uv`](https://github.com/astral-sh/uv).
 - **Network (first run only)**: outbound HTTPS to download the ONNX layout model and Noto fonts. After caching, the server runs fully offline.
 
